@@ -1,0 +1,121 @@
+name: 🚀 Deploy LéO Africa Institute to cPanel
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: 🎉 Deploy to cPanel
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🚚 Get latest code
+      uses: actions/checkout@v4
+      
+    - name: 🐘 Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.3'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_sqlite, dom, filter, gd, json, zip
+        coverage: none
+        
+    - name: 📦 Install Composer dependencies
+      run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        
+    - name: 📦 Install NPM dependencies
+      run: npm ci
+      
+    - name: 🏗️ Build frontend assets
+      run: npm run build
+      env:
+        NODE_ENV: production
+        
+    - name: 📝 Create .env for production
+      run: |
+        echo "APP_NAME=\"LéO Africa Institute\"" > .env.production
+        echo "APP_ENV=production" >> .env.production
+        echo "APP_DEBUG=false" >> .env.production
+        echo "APP_URL=\${{ secrets.APP_URL }}" >> .env.production
+        echo "" >> .env.production
+        echo "DB_CONNECTION=mysql" >> .env.production
+        echo "DB_HOST=\${{ secrets.DB_HOST }}" >> .env.production
+        echo "DB_PORT=3306" >> .env.production
+        echo "DB_DATABASE=\${{ secrets.DB_DATABASE }}" >> .env.production
+        echo "DB_USERNAME=\${{ secrets.DB_USERNAME }}" >> .env.production
+        echo "DB_PASSWORD=\${{ secrets.DB_PASSWORD }}" >> .env.production
+        
+    - name: 📦 Create deployment package
+      run: |
+        mkdir -p deployment-package
+        rsync -av --exclude='.git' \
+                  --exclude='node_modules' \
+                  --exclude='tests' \
+                  --exclude='.github' \
+                  --exclude='storage/logs/*' \
+                  --exclude='storage/framework/cache/*' \
+                  --exclude='storage/framework/sessions/*' \
+                  --exclude='storage/framework/views/*' \
+                  --exclude='.env' \
+                  --exclude='.env.example' \
+                  --exclude='phpunit.xml' \
+                  --exclude='README.md' \
+                  ./ deployment-package/
+        cp .env.production deployment-package/.env
+        cd deployment-package
+        zip -r ../leo-africa-laravel.zip . -x "*.git*" "*.DS_Store" "*Thumbs.db"
+        ls -lh ../leo-africa-laravel.zip
+        
+    - name: 📂 Deploy via FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      with:
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        local-dir: ./deployment-package/
+        server-dir: ./public_html/
+        exclude: |
+          **/.git*
+          **/.git*/**
+          **/node_modules/**
+          **/tests/**
+          **/.env.example
+          **/phpunit.xml
+          
+    - name: 🔧 Run post-deployment commands via SSH
+      uses: appleboy/ssh-action@v1.2.0
+      continue-on-error: true
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          cd public_html
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          php artisan storage:link
+          chmod -R 755 storage bootstrap/cache
+          
+    - name: 📤 Upload deployment package as artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: leo-africa-deployment-package
+        path: leo-africa-laravel.zip
+        retention-days: 7
+        
+    - name: ✅ Deployment Complete
+      run: |
+        echo "🎉 Deployment completed successfully!"
+        echo "📦 Package: leo-africa-laravel.zip"
+        echo "🌐 Site should be live at: ${{ secrets.APP_URL }}"
