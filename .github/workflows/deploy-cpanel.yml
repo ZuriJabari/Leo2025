@@ -81,7 +81,7 @@ jobs:
         username: ${{ secrets.FTP_USERNAME }}
         password: ${{ secrets.FTP_PASSWORD }}
         local-dir: ./deployment-package/
-        server-dir: ${{ secrets.SERVER_DIR || './public_html/' }}
+        server-dir: ${{ (secrets.SERVER_DIR || './public_html/') }}/
         exclude: |
           **/.git*
           **/.git*/**
