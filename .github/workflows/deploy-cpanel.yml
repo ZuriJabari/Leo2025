@@ -100,11 +100,21 @@ jobs:
         port: ${{ secrets.SSH_PORT || 22 }}
         script: |
           cd ${{ secrets.SERVER_DIR }}
-          php artisan config:cache
-          php artisan route:cache
-          php artisan view:cache
-          php artisan storage:link
-          chmod -R 755 storage bootstrap/cache
+          # ensure app key exists
+          if ! grep -q '^APP_KEY=base64:' .env; then
+            php artisan key:generate || true
+          fi
+          # run migrations (first deploy safe)
+          php artisan migrate --force || true
+          # link storage if missing
+          php artisan storage:link || true
+          # clear then rebuild caches
+          php artisan optimize:clear || true
+          php artisan config:cache || true
+          php artisan route:cache || true
+          php artisan view:cache || true
+          # permissions
+          chmod -R 755 storage bootstrap/cache || true
           
     - name: 📤 Upload deployment package as artifact
       if: always()
